@@ -147,12 +147,18 @@ library(pbapply) # For the progress bar!
 # doi.org/10.5194/bg-10-3039-2013
 # doi.org/10.3389/fmars.2020.00238
 
-cat("Filtering seamount categories...\n")
+# 2. Categorize the seamounts based on Statistical Tertiles (33.3% splits)
+cat("Filtering seamount categories by tertiles...\n")
+
+# Create a new column dividing them into 3 equal-sized groups based on HEIGHT
+# 1 = Smallest 33%, 2 = Middle 33%, 3 = Tallest 33%
+seamounts_360 <- seamounts_360 %>% mutate(size_group = ntile(HEIGHT, 3))
+
 categories <- list(
   "All"    = seamounts_360,
-  "Small"  = seamounts_360 %>% filter(HEIGHT <= 500),
-  "Medium" = seamounts_360 %>% filter(HEIGHT > 500 & HEIGHT <= 1000),
-  "Big"    = seamounts_360 %>% filter(HEIGHT > 1000)
+  "Small"  = seamounts_360 %>% filter(size_group == 1),
+  "Medium" = seamounts_360 %>% filter(size_group == 2),
+  "Big"    = seamounts_360 %>% filter(size_group == 3)
 )
 
 # 3. Define Grid Parameters
@@ -238,3 +244,142 @@ for (cat_name in names(categories)) {
 # 7. Shut down the cluster to free up memory
 stopCluster(cl)
 cat("\nAll 4 NetCDF files generated successfully!\n")
+
+# Load the required libraries
+library(terra)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(sf)
+library(maps)
+library(scales)
+
+# =============================================================================
+# 1. PREPARE THE DATA (Same as before)
+# =============================================================================
+nc_files <- c(
+  "Distance_All_Seamounts_5km.nc", 
+  "Distance_Big_Seamounts_5km.nc",
+  "Distance_Medium_Seamounts_5km.nc", 
+  "Distance_Small_Seamounts_5km.nc"
+)
+
+r_stack <- rast(nc_files)
+names(r_stack) <- c("All Seamounts", "Big Seamounts", "Medium Seamounts", "Small Seamounts")
+
+cat("Aggregating raster for faster plotting...\n")
+r_agg <- aggregate(r_stack, fact = 2, fun = mean)
+
+r_df <- as.data.frame(r_agg, xy = TRUE) %>%
+  pivot_longer(cols = -c(x, y), names_to = "Category", values_to = "Distance")
+
+# To prevent log10(0) returning -Inf (which turns into empty NA pixels), 
+# we cap the minimum distance at 1 km. 
+r_df$Distance <- ifelse(r_df$Distance < 1, 1, r_df$Distance)
+
+# Create overlaid points (Assuming seamounts_360 already has 'size_group' from ntile)
+pts_all <- seamounts_360 %>% mutate(Category = "All Seamounts")
+pts_big <- seamounts_360 %>% filter(size_group == 3) %>% mutate(Category = "Big Seamounts")
+pts_med <- seamounts_360 %>% filter(size_group == 2) %>% mutate(Category = "Medium Seamounts")
+pts_small <- seamounts_360 %>% filter(size_group == 1) %>% mutate(Category = "Small Seamounts")
+
+pts_combined <- bind_rows(pts_all, pts_big, pts_med, pts_small)
+coords <- st_coordinates(pts_combined)
+pts_df <- pts_combined %>%
+  st_drop_geometry() %>%
+  bind_cols(x = coords[, "X"], y = coords[, "Y"])
+
+# =============================================================================
+# 2. DEFINE THE CAPTIONS
+# =============================================================================
+# These will be dynamically injected into the plot captions
+captions <- list(
+  "All Seamounts" = "Category Definition: All documented seamounts in the dataset.",
+  "Big Seamounts" = "Category Definition: Top 33.3% of seamounts by height (Statistical Tertile).",
+  "Medium Seamounts" = "Category Definition: Middle 33.3% of seamounts by height (Statistical Tertile).",
+  "Small Seamounts" = "Category Definition: Bottom 33.3% of seamounts by height (Statistical Tertile)."
+)
+
+# =============================================================================
+# 3. LOOP THROUGH CATEGORIES AND SAVE INDIVIDUAL MAPS
+# =============================================================================
+world_map <- map_data("world2")
+categories <- names(captions)
+
+for (cat_name in categories) {
+  
+  cat(sprintf("Generating and saving map for %s...\n", cat_name))
+  
+  # Subset data for the current category
+  r_sub <- r_df %>% filter(Category == cat_name)
+  pts_sub <- pts_df %>% filter(Category == cat_name)
+  
+  # Build the individual plot
+  p <- ggplot() +
+    
+    # Raster Heatmap
+    geom_raster(data = r_sub, aes(x = x, y = y, fill = Distance)) +
+    
+    # Landmass
+    geom_polygon(data = world_map, aes(x = long, y = lat, group = group),
+                 fill = "grey15", color = "grey35", linewidth = 0.1) +
+    
+    # Points
+    geom_point(data = pts_sub, aes(x = x, y = y), 
+               color = "#ffcc00", size = 0.3, alpha = 0.7) +
+    
+    # Log10 Color Scale
+    scale_fill_viridis_c(
+      option = "mako", 
+      direction = -1, 
+      trans = "log10",                   # Applies the Log10 transformation
+      breaks = trans_breaks("log10", function(x) 10^x), 
+      labels = trans_format("log10", math_format(10^.x)), 
+      name = "Distance (km) [Log10 Scale]",
+      na.value = "#0b141f"
+    ) +
+    
+    # Limits
+    coord_cartesian(xlim = c(0, 360), ylim = c(-75, 75), expand = FALSE) +
+    
+    # Labels (Title + Subtitle + Caption)
+    labs(
+      title = sprintf("Global Oceanic Proximity: %s", cat_name),
+      subtitle = "Geodesic distance to the nearest seamount with specific locations overlaid",
+      caption = captions[[cat_name]],
+      x = "Longitude", 
+      y = "Latitude"
+    ) +
+    
+    # Professional Theme
+    theme_minimal(base_size = 14) +
+    theme(
+      panel.background = element_rect(fill = "#0b141f", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.grid = element_blank(),
+      
+      plot.title = element_text(face = "bold", size = 20, margin = margin(b = 8)),
+      plot.subtitle = element_text(size = 13, color = "grey40", margin = margin(b = 10)),
+      plot.caption = element_text(size = 11, face = "italic", color = "grey30", hjust = 1, margin = margin(t = 15)),
+      
+      axis.text = element_text(color = "grey50", size = 10),
+      axis.title = element_text(color = "grey30", face = "bold"),
+      
+      legend.position = "bottom",
+      legend.key.width = unit(4, "cm"),
+      legend.key.height = unit(0.5, "cm"),
+      legend.title.position = "top",
+      legend.title = element_text(hjust = 0.5, face = "bold", size = 13),
+      legend.text = element_text(size = 11)
+    )
+  
+  # Format file name (e.g., "Map_Big_Seamounts.png")
+  safe_name <- gsub(" ", "_", cat_name)
+  file_out <- sprintf("output/Map_%s_Log10.png", safe_name)
+  
+  # Save the individual map
+  ggsave(file_out, plot = p, width = 12, height = 7, dpi = 300)
+}
+
+cat("All 4 individual Log10 maps have been saved successfully to the output folder!\n")
+
