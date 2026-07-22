@@ -135,102 +135,106 @@ ggsave("output/knolls_morphology_hex.png", width = 7, height = 7, dpi = 300, bg 
 
 # 1. Load the necessary libraries
 library(sf)
+library(dplyr)
 library(terra)
+library(parallel)
+library(pbapply) # For the progress bar!
 
+# 2. Categorize the seamounts
 # (Assuming your dataset is currently an sf object named 'seamounts_360')
 
-# 2. Convert the sf point object to a terra SpatVector
-seamounts_vect <- vect(seamounts_360)
+# doi.org/10.5670/oceanog.2010.60
+# doi.org/10.5194/bg-10-3039-2013
+# doi.org/10.3389/fmars.2020.00238
 
-# 3. Create a template global raster
-# Since your data uses a 0 to 360 longitude range (based on the bounding box),
-# we define the extent as xmin=0, xmax=360, ymin=-90, ymax=90.
-# The resolution is set to 0.5 degrees (~55km at the equator). 
-# Note: Decrease this number (e.g., 0.1) for a smoother, higher-resolution map, 
-# but it will take longer to compute.
-template_raster <- rast(ext(0, 360, -90, 90), resolution = 0.5, crs = "EPSG:4326")
+cat("Filtering seamount categories...\n")
+categories <- list(
+  "All"    = seamounts_360,
+  "Small"  = seamounts_360 %>% filter(HEIGHT <= 500),
+  "Medium" = seamounts_360 %>% filter(HEIGHT > 500 & HEIGHT <= 1000),
+  "Big"    = seamounts_360 %>% filter(HEIGHT > 1000)
+)
 
-# 4. Calculate the distance from all raster cells to the nearest point
-# Because the CRS is unprojected (WGS 84), terra::distance automatically 
-# calculates geodesic distances in meters.
-dist_raster <- distance(template_raster, seamounts_vect)
+# 3. Define Grid Parameters
+res_5km <- 5 / 111.12  # ~5km resolution
 
-# 5. Convert the distance from meters to kilometers for easier interpretation
-dist_raster_km <- dist_raster / 1000
-names(dist_raster_km) <- "Distance_to_Seamount_km"
+# Create 60 latitudinal boundaries (chunks) from -90 to 90
+n_chunks <- 60
+lat_breaks <- seq(-90, 90, length.out = n_chunks + 1)
 
-# 6. Plot the results to visualize
-plot(dist_raster_km, 
-     main = "Distance to Nearest Seamount (km)",
-     col = mapview::mapviewGetOption("raster.palette")(100)) # Optional: smooth color palette
-plot(seamounts_vect, add = TRUE, col = "black", cex = 0.1, pch = 16)
+# 4. Setup the Parallel Cluster
+n_cores <- 20 # Using 20 cores, leaving 2 for the OS
+cat(sprintf("Firing up cluster with %d cores...\n", n_cores))
+cl <- makeCluster(n_cores)
 
-library(ggplot2)
-library(maps)   # For the world2 base map
-library(scales) # For clean number formatting in the legend
+# Load required packages on all 20 worker cores
+invisible(clusterEvalQ(cl, {
+  library(terra)
+  library(sf)
+}))
 
-# 6. Convert the SpatRaster to a dataframe so ggplot2 can read it
-# xy = TRUE keeps the longitude and latitude coordinates
-dist_df <- as.data.frame(dist_raster_km, xy = TRUE)
-colnames(dist_df) <- c("lon", "lat", "distance")
-
-# Extract the 0-360 world map for the landmass overlay
-world_map <- map_data("world2")
-
-# 7. Build the Professional Plot
-p_dist <- ggplot() +
+# 5. Define the Worker Function
+# This runs independently on every core. It calculates the distance for just 
+# one latitudinal strip, saves it as a temporary file, and returns the path.
+process_strip <- function(i, sf_pts, lat_breaks, res_5km) {
   
-  # A. The Raster Heatmap
-  geom_raster(data = dist_df, aes(x = lon, y = lat, fill = distance)) +
+  ymin <- lat_breaks[i]
+  ymax <- lat_breaks[i + 1]
   
-  # B. The Landmass Overlay (Drawn on top of the raster)
-  geom_polygon(
-    data = world_map, 
-    aes(x = long, y = lat, group = group),
-    fill = "grey15", color = "grey30", linewidth = 0.2
-  ) +
+  # Create a blank raster for just this strip
+  strip_rast <- rast(ext(0, 360, ymin, ymax), resolution = res_5km, crs = "EPSG:4326")
   
-  # C. The Color Scale
-  # 'mako' is a stunning dark-blue to bright-cyan palette perfect for ocean data.
-  # direction = -1 makes distances close to 0 bright, and far distances dark.
-  scale_fill_viridis_c(
-    option = "mako", 
-    direction = -1, 
-    name = "Distance (km)", 
-    labels = label_comma()
-  ) +
+  # Note: Even though we calculate distance for a small strip, we pass the 
+  # ENTIRE seamount dataset (v_pts) so it accurately finds the closest point, 
+  # even if that point is physically located in a different strip!
+  v_pts <- vect(sf_pts)
   
-  # D. Projections and Limits
-  # Crops out the extreme poles (Antarctica) to focus on the global oceans
-  coord_cartesian(xlim = c(0, 360), ylim = c(-75, 75), expand = FALSE) +
+  # Calculate geodesic distance (meters), then convert to km
+  d_meters <- distance(strip_rast, v_pts)
+  d_km <- d_meters / 1000
+  names(d_km) <- "Distance_km"
   
-  # E. Labels
-  labs(
-    title = "Global Proximity to Seamounts",
-    subtitle = "Geodesic distance to the nearest seamount (0.5° resolution grid)",
-    x = "Longitude", 
-    y = "Latitude"
-  ) +
+  # Write to temporary file (safest way to pass rasters back from parallel workers)
+  tmp_file <- tempfile(fileext = ".tif")
+  writeRaster(d_km, tmp_file, overwrite = TRUE)
   
-  # F. Dark Mode Theme
-  theme_minimal(base_size = 14) +
-  theme(
-    panel.background = element_rect(fill = "#0b141f", color = NA),
-    panel.grid = element_blank(), # Removes gridlines for a cleaner look
-    
-    plot.title = element_text(face = "bold", margin = margin(b = 5)),
-    plot.subtitle = element_text(size = 11, color = "grey40", margin = margin(b = 15)),
-    axis.text = element_text(color = "grey50"),
-    
-    # Move the legend to the bottom and make it a wide color bar
-    legend.position = "bottom",
-    legend.key.width = unit(3, "cm"),
-    legend.title.position = "top",
-    legend.title = element_text(hjust = 0.5, face = "bold")
-  )
+  return(tmp_file)
+}
 
-# View the plot
-print(p_dist)
+# 6. Execute the processing loop for each category
+for (cat_name in names(categories)) {
+  
+  cat(sprintf("\n======================================================\n"))
+  cat(sprintf("Calculating distances for %s Seamounts...\n", toupper(cat_name)))
+  
+  sf_data <- categories[[cat_name]]
+  
+  # pblapply acts like a standard loop, but runs across your 20 cores AND 
+  # displays a live progress bar in the console!
+  tif_files <- pblapply(1:n_chunks, process_strip, 
+                        sf_pts = sf_data, 
+                        lat_breaks = lat_breaks, 
+                        res_5km = res_5km, 
+                        cl = cl)
+  
+  cat("Stitching chunks together...\n")
+  # Read the temporary files as a SpatRasterCollection, then mosaic them
+  raster_collection <- sprc(unlist(tif_files))
+  final_raster <- mosaic(raster_collection)
+  
+  # Export to NetCDF
+  out_name <- sprintf("Distance_%s_Seamounts_5km.nc", cat_name)
+  cat(sprintf("Exporting to %s...\n", out_name))
+  
+  writeCDF(final_raster, out_name, overwrite = TRUE,
+           varname = "distance", 
+           longname = sprintf("Geodesic distance to nearest %s seamount", tolower(cat_name)), 
+           unit = "km")
+  
+  # Clean up the temporary tif files from your hard drive
+  unlink(unlist(tif_files))
+}
 
-# Optional: Save the high-resolution output
-ggsave("output/Global_Seamount_Proximity.png", plot = p_dist, width = 16, height = 9, dpi = 300)
+# 7. Shut down the cluster to free up memory
+stopCluster(cl)
+cat("\nAll 4 NetCDF files generated successfully!\n")
