@@ -108,7 +108,7 @@ ggplot() +
   scale_color_viridis_c(option = "mako", name = "Depth (m)") +
   pacific_view + map_theme_adjust +
   labs(title = "Pacific Knolls by Summit Depth", x = "Longitude", y = "Latitude", caption = metadata_caption)
-ggsave("output/knolls_by_depth.png", width = 11, height = 7, dpi = 300, bg = "white")
+ggsave("output/knolls_by_depth.png", width = 8, height = 9, dpi = 300, bg = "white")
 
 
 # ==============================================================================
@@ -122,7 +122,7 @@ ggplot(seamounts_360, aes(x = DEPTH, y = HEIGHT)) +
   hex_theme_adjust + 
   labs(title = "Seamounts: Morphological Density Structure", 
        x = "Depth", y = "Height", caption = metadata_caption)
-ggsave("output/seamounts_morphology_hex.png", width = 7, height = 7, dpi = 300, bg = "white")
+ggsave("output/seamounts_morphology_hex.png", width = 8, height = 9, dpi = 300, bg = "white")
 
 # Plot 6: Knolls Morphological Density
 ggplot(knolls_360, aes(x = DEPTH, y = HEIGHT)) +
@@ -131,7 +131,7 @@ ggplot(knolls_360, aes(x = DEPTH, y = HEIGHT)) +
   hex_theme_adjust + 
   labs(title = "Knolls: Morphological Density Structure", 
        x = "Depth", y = "Height", caption = metadata_caption)
-ggsave("output/knolls_morphology_hex.png", width = 7, height = 7, dpi = 300, bg = "white")
+ggsave("output/knolls_morphology_hex.png", width = 8, height = 9, dpi = 300, bg = "white")
 
 # 1. Load the necessary libraries
 library(sf)

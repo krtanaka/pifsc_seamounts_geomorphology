@@ -1,153 +1,189 @@
-# ---------------------------------------------------------
-# The Bulletproof Raster Geomorphology Workflow
-# ---------------------------------------------------------
+# ==============================================================================
+# MASTER SEAFLOOR GEOMORPHOLOGY WORKFLOW (WITH SOURCE CITATION & SINGLE-COL LEGEND)
+# Bypasses Vector Bugs, Parallelizes Spatial Data, and Exports Multiple Maps
+# ==============================================================================
+
+# 1. LOAD ALL LIBRARIES ONCE
 library(terra)
+library(ggplot2)
+library(sf)
+library(rnaturalearth) 
+library(scales)
+library(foreach)
+library(doParallel)
 
-# 1. Define Directories
-data_dir <- "C://Users/Kisei.Tanaka/Desktop/global seafloor geomorphic features map/"
-out_dir <- "C://Users/Kisei.Tanaka/Desktop/rasterized_geomorph_10km/"
+# 2. GLOBAL PATHS & PARAMETERS
+data_dir    <- "C://Users/Kisei.Tanaka/Desktop/global seafloor geomorphic features map/"
+out_dir     <- "C://Users/Kisei.Tanaka/Desktop/rasterized_geomorph_10km/"
+pacific_crs <- "+proj=robin +lon_0=150 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 
-# Create the output folder if it doesn't exist
 dir.create(out_dir, showWarnings = FALSE)
 
-# Find all shapefiles
+# Master Stacking Order (From Background Abyss to Foreground Features)
+ordered_layers <- c(
+  "Abyss", "Abyssal_Classification", "Basins", "Shelf", "Shelf_Classification", 
+  "Slope", "Plateaus", "Terraces", "Rises", "Fans", "Bridges", "Sills", 
+  "Troughs", "Glacial_troughs", "Ridges", "Spreading_ridges", "Escarpments", 
+  "Canyons", "Shelf_valleys", "Rift_valleys", "Guyots", "Seamounts", 
+  "Trenches", "Hadal"
+)
+
+# ==============================================================================
+# PHASE A: BATCH RASTERIZATION (Vector to GeoTIFF)
+# ==============================================================================
 shp_paths <- list.files(data_dir, pattern = "\\.shp$", full.names = TRUE)
 layer_names <- tools::file_path_sans_ext(basename(shp_paths))
 
-# 2. Create the 10km Global Raster Template
-# Extent is global (-180 to 180). Resolution is 0.09 degrees (~10km)
-template_rast <- rast(ext(-180, 180, -90, 90), resolution = 0.05, crs = "EPSG:4326")
-
-# 3. Batch Rasterize and Export
-message("Rasterizing shapefiles. This completely bypasses vector topology bugs...")
-
-for (i in seq_along(shp_paths)) {
-  name <- layer_names[i]
-  cat("Converting & Saving:", name, "\n")
+if (length(shp_paths) > 0) {
+  message("Rasterizing shapefiles to 0.05° (~5.5km) template...")
+  template_rast <- rast(ext(-180, 180, -90, 90), resolution = 0.05, crs = "EPSG:4326")
   
-  # Load vector with terra
-  v <- vect(shp_paths[i])
-  
-  # Create a dummy column so every pixel gets a value of 1
-  v$present <- 1
-  
-  # Rasterize: If the feature exists in the pixel, assign 1. Otherwise, NA.
-  r <- rasterize(v, template_rast, field = "present", background = NA)
-  
-  # Export as GeoTIFF
-  out_file <- paste0(out_dir, name, "_10km.tif")
-  writeRaster(r, out_file, overwrite = TRUE)
+  for (i in seq_along(shp_paths)) {
+    name <- layer_names[i]
+    cat("Processing raw vector:", name, "\n")
+    v <- vect(shp_paths[i])
+    v$present <- 1
+    r <- rasterize(v, template_rast, field = "present", background = NA)
+    writeRaster(r, paste0(out_dir, name, "_10km.tif"), overwrite = TRUE)
+  }
 }
 
-library(terra)
-library(ggplot2)
+# ==============================================================================
+# PHASE B: SPATIAL DATA PREPARATION (Run Once)
+# ==============================================================================
 
-# 1. Define Directories and Projections
-out_dir <- "C://Users/Kisei.Tanaka/Desktop/rasterized_geomorph_10km/"
-pacific_crs <- "+proj=robin +lon_0=150 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+# 1. Clean Landmass Boundaries with Full Polar Corrections
+message("Preparing landmass boundaries...")
+world_land <- ne_countries(scale = "medium", returnclass = "sf")
+world_land_cropped <- st_crop(world_land, xmin = -180, xmax = 180, ymin = -85, ymax = 85)
 
-message("Loading rasters and projecting to the Pacific Robinson...")
+sf_use_s2(FALSE) 
+land_pac <- world_land_cropped %>% 
+  st_make_valid() %>% 
+  st_transform(crs = pacific_crs) %>% 
+  st_collection_extract("POLYGON") 
+sf_use_s2(TRUE)
 
-# 2. Load and Project Global Features
-# (We use method = "near" for categorical/binary data like geomorphology)
-abyss_pac     <- project(rast(paste0(out_dir, "Abyss_10km.tif")), pacific_crs, method = "near")
-ridges_pac    <- project(rast(paste0(out_dir, "Ridges_10km.tif")), pacific_crs, method = "near")
-trenches_pac  <- project(rast(paste0(out_dir, "Trenches_10km.tif")), pacific_crs, method = "near")
-seamounts_pac <- project(rast(paste0(out_dir, "Seamounts_10km.tif")), pacific_crs, method = "near")
+# 2. Turbocharged Parallel Raster Processing Engine
+num_cores <- parallel::detectCores() - 1
+message("Spawning parallel cluster using ", num_cores, " CPU cores...")
 
-message("Converting rasters to data frames for ggplot2...")
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
 
-# 3. Convert Global Rasters to Data Frames
-# na.rm = TRUE is critical so we don't plot empty pixels
-df_abyss_pac     <- as.data.frame(abyss_pac, xy = TRUE, na.rm = TRUE)
-df_ridges_pac    <- as.data.frame(ridges_pac, xy = TRUE, na.rm = TRUE)
-df_trenches_pac  <- as.data.frame(trenches_pac, xy = TRUE, na.rm = TRUE)
-df_seamounts_pac <- as.data.frame(seamounts_pac, xy = TRUE, na.rm = TRUE)
+message("Processing 24 layers in parallel (Reprojecting & Downsampling)...")
+df_list <- foreach(
+  layer = ordered_layers, 
+  .packages = c("terra"), 
+  .export = c("out_dir", "pacific_crs")
+) %dopar% {
+  file_path <- paste0(out_dir, layer, "_10km.tif")
+  
+  if (file.exists(file_path)) {
+    r       <- rast(file_path)
+    r_proj  <- project(r, pacific_crs, method = "near")
+    r_agg   <- aggregate(r_proj, fact = 5, fun = "max") 
+    df      <- as.data.frame(r_agg, xy = TRUE, na.rm = TRUE)
+    
+    if (nrow(df) > 0) {
+      df$Feature <- gsub("_", " ", layer)
+      return(df[, c("x", "y", "Feature")])
+    }
+  }
+  return(NULL)
+}
 
-# 4. Build the Global Pacific ggplot
-message("Building global Pacific map...")
+stopCluster(cl) 
+message("Parallel extraction complete. Assembling master dataset...")
+
+df_list    <- Filter(Negate(is.null), df_list)
+df_all_pac <- do.call(rbind, df_list)
+
+# 3. Premium High-Contrast Thematic Palette
+vibrant_colors <- c(
+  # Deep Ocean Floor Family (Quiet Blues)
+  "Abyss"                  = "#122643", "Abyssal Classification" = "#1a365d",
+  "Basins"                 = "#22467b", "Rises"                  = "#2e5b9a",
+  
+  # Shallow & Coastlines Family (Muted Greens/Teals)
+  "Shelf"                  = "#2d6a4f", "Shelf Classification"   = "#40916c",
+  "Shelf valleys"          = "#52b788", "Slope"                  = "#1b4332",
+  "Plateaus"               = "#74c69d", "Terraces"               = "#95d5b2", "Fans" = "#b7e4c7",
+  
+  # Volcanic High-Relief Family (Warm Accents)
+  "Ridges"                 = "#d68c45", "Spreading ridges"       = "#ffb703",
+  "Rift valleys"           = "#fb8500", "Escarpments"            = "#ee9b00",
+  "Guyots"                 = "#ca6702", "Seamounts"              = "#ae2012",
+  
+  # Dynamic Structural Cuts (Neon Cyans, Purples & Whites)
+  "Bridges"                = "#9b5de5", "Sills"                  = "#f15bb5",
+  "Troughs"                = "#00bbf9", "Glacial troughs"        = "#00f5d4",
+  "Canyons"                = "#00f5d4", "Trenches"               = "#00ffff", "Hadal" = "#ffffff"
+)
+
+# 4. Extracted Map Citation text from Document Source
+source_text <- "Source: Harris, P.T. & McMillan-Lawler, M. (GRID-Arendal). Global Seafloor Geomorphic Features Map (GSFM), interpreted from the SRTM 30 arc-second (~1 km) global bathymetry grid (Harris et al., 2014)."
+
+# Shared Core Theme Engine (With Single-Column Legend Adaptations)
+base_map_theme <- theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "#020408", color = NA),
+    plot.background  = element_rect(fill = "#020408", color = NA),
+    plot.title       = element_text(face = "bold", size = 20, hjust = 0.5, color = "#ffffff"),
+    plot.subtitle    = element_text(size = 11, hjust = 0.5, color = "#ffffff", margin = margin(b = 15)),
+    plot.caption     = element_text(size = 8, color = "#ffffff", hjust = 0, margin = margin(t = 15, l = 20)),
+    axis.text        = element_blank(),
+    axis.title       = element_blank(),
+    
+    legend.position   = "bottom",
+    legend.background = element_rect(fill = "#0a0d14", color = "#1c2331", linewidth = 0.5),
+    legend.key        = element_blank(),
+    legend.text       = element_text(color = "#ffffff", size = 8, face = "bold"),
+    legend.title      = element_blank(),
+    legend.key.size   = unit(0.35, "cm") # Muted box scale so 24 rows fit elegantly vertically
+  )
+
+# ==============================================================================
+# PHASE C: MAP RENDERING & EXPORTS
+# ==============================================================================
+
+# --- MAP 1: FULL GLOBAL PACIFIC VIEW ---
+message("Rendering Global Pacific map...")
 p_global <- ggplot() +
-  # Note: The fill values here map to the 'present' column (1) we created during rasterization.
-  # We force the fill color directly since these are effectively binary presence layers.
-  geom_tile(data = df_abyss_pac, aes(x = x, y = y), fill = "#1a2a4a", alpha = 0.8) +
-  geom_tile(data = df_ridges_pac, aes(x = x, y = y), fill = "#d68c45") +
-  geom_tile(data = df_trenches_pac, aes(x = x, y = y), fill = "#00ffff") +
-  geom_tile(data = df_seamounts_pac, aes(x = x, y = y), fill = "#e63946") +
-  
-  # Ensure the Robinson projection scales correctly
-  coord_fixed() + 
-  
-  theme_minimal() +
-  theme(
-    panel.background = element_rect(fill = "#0b1325", color = NA),
-    plot.background = element_rect(fill = "#ffffff", color = NA),
-    panel.grid.major = element_line(color = "#ffffff1a", linewidth = 0.2), 
-    panel.grid.minor = element_blank(),
-    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
-    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30"),
-    axis.text = element_blank(), # Hide arbitrary meter coordinates
-    axis.title = element_blank()
-  ) +
+  geom_raster(data = df_all_pac, aes(x = x, y = y, fill = Feature)) +
+  geom_sf(data = land_pac, fill = "#0a0d14", color = "#1c2331", linewidth = 0.2, inherit.aes = FALSE) +
+  coord_sf(crs = pacific_crs, datum = NA) + 
+  scale_fill_manual(values = vibrant_colors, guide = guide_legend(nrow = 2)) +
+  base_map_theme +
   labs(
-    title = "Pacific Ocean Seafloor Geomorphology",
-    subtitle = "Abyss (Dark Blue), Ridges (Orange), Trenches (Cyan), Seamounts (Red)"
+    title    = "Pacific Ocean Seafloor Geomorphology",
+    caption  = source_text
   )
 
-# 5. Save the Global Map
-ggsave(filename = "C://Users/Kisei.Tanaka/Desktop/Pacific_Geomorphology_Global.png", 
-       plot = p_global, width = 12, height = 7, dpi = 300)
-message("Global Pacific map saved.")
+ggsave(filename = "output/Pacific_Geomorphology_24Layers_Global.png", 
+       plot = p_global, width = 16, height = 10, dpi = 300)
 
-# ---------------------------------------------------------
-# REGIONAL: Main Hawaiian Islands 
-# ---------------------------------------------------------
-
-http://googleusercontent.com/map_location_reference/1
-message("Processing regional [Island of Hawai'i](http://googleusercontent.com/map_location_reference/0) map...")
-
-# 6. Define MHI Extent (Unprojected WGS84)
-mhi_ext <- ext(-161.5, -154.0, 18.5, 22.5)
-
-# 7. Load and Crop Unprojected Rasters
-mhi_abyss     <- crop(rast(paste0(out_dir, "Abyss_10km.tif")), mhi_ext)
-mhi_slope     <- crop(rast(paste0(out_dir, "Slope_10km.tif")), mhi_ext)
-mhi_shelf     <- crop(rast(paste0(out_dir, "Shelf_10km.tif")), mhi_ext)
-mhi_seamounts <- crop(rast(paste0(out_dir, "Seamounts_10km.tif")), mhi_ext)
-
-# 8. Convert MHI Rasters to Data Frames
-df_mhi_abyss     <- as.data.frame(mhi_abyss, xy = TRUE, na.rm = TRUE)
-df_mhi_slope     <- as.data.frame(mhi_slope, xy = TRUE, na.rm = TRUE)
-df_mhi_shelf     <- as.data.frame(mhi_shelf, xy = TRUE, na.rm = TRUE)
-df_mhi_seamounts <- as.data.frame(mhi_seamounts, xy = TRUE, na.rm = TRUE)
-
-# 9. Build the MHI ggplot
-p_mhi <- ggplot() +
-  geom_tile(data = df_mhi_abyss, aes(x = x, y = y), fill = "#1a2a4a") +
-  geom_tile(data = df_mhi_slope, aes(x = x, y = y), fill = "#2c4c7c") +
-  geom_tile(data = df_mhi_shelf, aes(x = x, y = y), fill = "#8b9bb4") +
-  geom_tile(data = df_mhi_seamounts, aes(x = x, y = y), fill = "#e63946") +
-  
-  # Keeps lat/long aspect ratio accurate
-  coord_quickmap() +
-  
-  theme_minimal() +
-  theme(
-    panel.background = element_rect(fill = "#0b1325", color = NA), 
-    plot.background = element_rect(fill = "#ffffff", color = NA),
-    panel.grid.major = element_line(color = "#ffffff1a", linewidth = 0.2), 
-    panel.grid.minor = element_blank(),
-    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
-    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30"),
-    axis.title = element_text(face = "bold")
-  ) +
+# --- MAP 2: TIGHTLY FOCUSED PACIFIC BASIN VIEW ---
+message("Rendering Focused Basin map...")
+p_focused <- ggplot() +
+  geom_raster(data = df_all_pac, aes(x = x, y = y, fill = Feature)) +
+  geom_sf(data = land_pac, fill = "#0a0d14", color = "#1c2331", linewidth = 0.2, inherit.aes = FALSE) +
+  coord_sf(
+    crs = pacific_crs, 
+    xlim = c(-6500000, 11500000), 
+    ylim = c(-6000000, 6500000), 
+    datum = NA, 
+    expand = FALSE
+  ) + 
+  scale_fill_manual(values = vibrant_colors, guide = guide_legend(ncol = 1)) +
+  base_map_theme +
   labs(
-    title = "Seafloor Geomorphology: Main Hawaiian Islands",
-    subtitle = "Abyss (Dark Blue), Slope (Mid Blue), Shelf (Light Blue), Seamounts (Red)",
-    x = "Longitude",
-    y = "Latitude"
+    title    = "Pacific Ocean Basin Seafloor Geomorphology",
+    subtitle = "Focused 24-feature bathymetric classification of the Pacific Rim",
+    caption  = source_text
   )
 
-# 10. Save the MHI Map
-ggsave(filename = "C://Users/Kisei.Tanaka/Desktop/MHI_Geomorphology_Regional.png", 
-       plot = p_mhi, width = 10, height = 6, dpi = 300)
-message("Regional MHI map saved.")
+ggsave(filename = "C://Users/Kisei.Tanaka/Desktop/Pacific_Basin_Focused_Map.png", 
+       plot = p_focused, width = 15, height = 10, dpi = 300)
+
+message("Process complete! Both maps saved with single-column legends and formal source references.")
