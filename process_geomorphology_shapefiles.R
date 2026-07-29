@@ -189,7 +189,7 @@ p_focused <- ggplot() +
     caption  = source_text
   ) + 
   # Shared Core Theme Engine (With Single-Column Legend Adaptations)
-theme_minimal(base_size = 15) +
+  theme_minimal(base_size = 30) +
   theme(
     panel.background = element_rect(fill = "#020408", color = NA),
     plot.background  = element_rect(fill = "#020408", color = NA),
