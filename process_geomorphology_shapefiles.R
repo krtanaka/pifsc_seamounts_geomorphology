@@ -1,5 +1,5 @@
 # ==============================================================================
-# MASTER SEAFLOOR GEOMORPHOLOGY WORKFLOW (WITH SOURCE CITATION & SINGLE-COL LEGEND)
+# MASTER SEAFLOOR GEOMORPHOLOGY WORKFLOW (WITH LAYER CHECKING & SOURCE CITATION)
 # Bypasses Vector Bugs, Parallelizes Spatial Data, and Exports Multiple Maps
 # ==============================================================================
 
@@ -14,7 +14,7 @@ library(doParallel)
 
 # 2. GLOBAL PATHS & PARAMETERS
 data_dir    <- "C://Users/Kisei.Tanaka/Desktop/global seafloor geomorphic features map/"
-out_dir     <- "C://Users/Kisei.Tanaka/Desktop/rasterized_geomorph_10km/"
+out_dir     <- "C://Users/Kisei.Tanaka/Desktop/rasterized_geomorph/"
 pacific_crs <- "+proj=robin +lon_0=150 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 
 dir.create(out_dir, showWarnings = FALSE)
@@ -29,22 +29,30 @@ ordered_layers <- c(
 )
 
 # ==============================================================================
-# PHASE A: BATCH RASTERIZATION (Vector to GeoTIFF)
+# PHASE A: BATCH RASTERIZATION (Vector to GeoTIFF - With Smart Skip Check)
 # ==============================================================================
 shp_paths <- list.files(data_dir, pattern = "\\.shp$", full.names = TRUE)
 layer_names <- tools::file_path_sans_ext(basename(shp_paths))
 
 if (length(shp_paths) > 0) {
-  message("Rasterizing shapefiles to 0.05° (~5.5km) template...")
+  message("Checking and rasterizing shapefiles to 0.05° (~5.5km) template...")
   template_rast <- rast(ext(-180, 180, -90, 90), resolution = 0.05, crs = "EPSG:4326")
   
   for (i in seq_along(shp_paths)) {
     name <- layer_names[i]
+    out_file <- paste0(out_dir, name, ".tif")
+    
+    # SMART SKIP: Bypass processing if the output GeoTIFF already exists
+    if (file.exists(out_file)) {
+      cat("Skipping (already rasterized):", name, "\n")
+      next
+    }
+    
     cat("Processing raw vector:", name, "\n")
     v <- vect(shp_paths[i])
     v$present <- 1
     r <- rasterize(v, template_rast, field = "present", background = NA)
-    writeRaster(r, paste0(out_dir, name, "_10km.tif"), overwrite = TRUE)
+    writeRaster(r, out_file, overwrite = TRUE)
   }
 }
 
@@ -77,7 +85,7 @@ df_list <- foreach(
   .packages = c("terra"), 
   .export = c("out_dir", "pacific_crs")
 ) %dopar% {
-  file_path <- paste0(out_dir, layer, "_10km.tif")
+  file_path <- paste0(out_dir, layer, ".tif")
   
   if (file.exists(file_path)) {
     r       <- rast(file_path)
@@ -121,27 +129,8 @@ vibrant_colors <- c(
   "Canyons"                = "#00f5d4", "Trenches"               = "#00ffff", "Hadal" = "#ffffff"
 )
 
-# 4. Extracted Map Citation text from Document Source
+# 4. Map Citation text from Document Source
 source_text <- "Source: Harris, P.T. & McMillan-Lawler, M. (GRID-Arendal). Global Seafloor Geomorphic Features Map (GSFM), interpreted from the SRTM 30 arc-second (~1 km) global bathymetry grid (Harris et al., 2014)."
-
-# Shared Core Theme Engine (With Single-Column Legend Adaptations)
-base_map_theme <- theme_minimal() +
-  theme(
-    panel.background = element_rect(fill = "#020408", color = NA),
-    plot.background  = element_rect(fill = "#020408", color = NA),
-    plot.title       = element_text(face = "bold", size = 20, hjust = 0.5, color = "#ffffff"),
-    plot.subtitle    = element_text(size = 11, hjust = 0.5, color = "#ffffff", margin = margin(b = 15)),
-    plot.caption     = element_text(size = 8, color = "#ffffff", hjust = 0, margin = margin(t = 15, l = 20)),
-    axis.text        = element_blank(),
-    axis.title       = element_blank(),
-    
-    legend.position   = "bottom",
-    legend.background = element_rect(fill = "#0a0d14", color = "#1c2331", linewidth = 0.5),
-    legend.key        = element_blank(),
-    legend.text       = element_text(color = "#ffffff", size = 8, face = "bold"),
-    legend.title      = element_blank(),
-    legend.key.size   = unit(0.35, "cm") # Muted box scale so 24 rows fit elegantly vertically
-  )
 
 # ==============================================================================
 # PHASE C: MAP RENDERING & EXPORTS
@@ -158,10 +147,27 @@ p_global <- ggplot() +
   labs(
     title    = "Pacific Ocean Seafloor Geomorphology",
     caption  = source_text
+  ) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "#020408", color = NA),
+    plot.background  = element_rect(fill = "#020408", color = NA),
+    plot.title       = element_text(face = "bold", size = 20, hjust = 0.5, color = "#ffffff"),
+    plot.subtitle    = element_text(size = 11, hjust = 0.5, color = "#8b9bb4", margin = margin(b = 15)),
+    plot.caption     = element_text(size = 8, color = "#54657e", hjust = 0, margin = margin(t = 15, l = 20)),
+    axis.text        = element_blank(),
+    axis.title       = element_blank(),
+    
+    legend.position   = "bottom",
+    legend.background = element_rect(fill = "#0a0d14", color = "#1c2331", linewidth = 0.5),
+    legend.key        = element_blank(),
+    legend.text       = element_text(color = "#ffffff", size = 8, face = "bold"),
+    legend.title      = element_blank(),
+    legend.key.size   = unit(0.35, "cm") 
   )
 
-ggsave(filename = "output/Pacific_Geomorphology_24Layers_Global.png", 
-       plot = p_global, width = 16, height = 10, dpi = 300)
+ggsave(filename = "output/Pacific_Geomorphology.png", 
+       plot = p_global, width = 16, height = 9, dpi = 300)
 
 # --- MAP 2: TIGHTLY FOCUSED PACIFIC BASIN VIEW ---
 message("Rendering Focused Basin map...")
@@ -181,9 +187,27 @@ p_focused <- ggplot() +
     title    = "Pacific Ocean Basin Seafloor Geomorphology",
     subtitle = "Focused 24-feature bathymetric classification of the Pacific Rim",
     caption  = source_text
+  ) + 
+  # Shared Core Theme Engine (With Single-Column Legend Adaptations)
+theme_minimal(base_size = 15) +
+  theme(
+    panel.background = element_rect(fill = "#020408", color = NA),
+    plot.background  = element_rect(fill = "#020408", color = NA),
+    plot.title       = element_text(face = "bold", size = 20, hjust = 0.5, color = "#ffffff"),
+    plot.subtitle    = element_text(size = 11, hjust = 0.5, color = "#8b9bb4", margin = margin(b = 15)),
+    plot.caption     = element_text(size = 8, color = "#54657e", hjust = 0, margin = margin(t = 15, l = 20)),
+    axis.text        = element_blank(),
+    axis.title       = element_blank(),
+    
+    legend.position   = "right",
+    legend.background = element_rect(fill = "#0a0d14", color = "#1c2331", linewidth = 0.5),
+    legend.key        = element_blank(),
+    legend.text       = element_text(color = "#ffffff", size = 8, face = "bold"),
+    legend.title      = element_blank(),
+    legend.key.size   = unit(0.35, "cm") 
   )
 
-ggsave(filename = "C://Users/Kisei.Tanaka/Desktop/Pacific_Basin_Focused_Map.png", 
-       plot = p_focused, width = 15, height = 10, dpi = 300)
+ggsave(filename = "output/Pacific_Basin_Focused_Map.png", 
+       plot = p_focused, width = 16, height = 9, dpi = 300)
 
-message("Process complete! Both maps saved with single-column legends and formal source references.")
+message("Process complete! Both maps updated and saved directly to your Desktop.")
