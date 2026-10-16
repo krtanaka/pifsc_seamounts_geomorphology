@@ -39,12 +39,13 @@ metadata_caption <- paste0(
   "Deep Sea Research Part I 58: 442-453. doi: 10.1016/j.dsr.2011.02.004 | Data URL: http://data.unep-wcmc.org/datasets/41"
 )
 
-dark_background <- "#0b141f"
-dark_panel <- "#111d2b"
+dark_background <- "black"
+dark_panel <- "black"
 dark_text <- "#e6edf3"
 muted_text <- "#a9b8c9"
 slide_width <- 16
 slide_height <- 9
+recalculate_distance_rasters <- FALSE # Set TRUE to recompute the 5 km distance rasters.
 
 # Shared theme adjustments for spatial maps (Legend Top-Right / Over USA)
 map_theme_adjust <- theme_minimal() +
@@ -160,12 +161,13 @@ library(pbapply) # For the progress bar!
 # doi.org/10.5194/bg-10-3039-2013
 # doi.org/10.3389/fmars.2020.00238
 
-# 2. Categorize the seamounts based on Statistical Tertiles (33.3% splits)
-cat("Filtering seamount categories by tertiles...\n")
-
 # Create a new column dividing them into 3 equal-sized groups based on HEIGHT
 # 1 = Smallest 33%, 2 = Middle 33%, 3 = Tallest 33%
 seamounts_360 <- seamounts_360 %>% mutate(size_group = ntile(HEIGHT, 3))
+
+if (recalculate_distance_rasters) {
+  # 2. Categorize the seamounts based on Statistical Tertiles (33.3% splits)
+  cat("Filtering seamount categories by tertiles...\n")
 
 categories <- list(
   "All"    = seamounts_360,
@@ -257,6 +259,7 @@ for (cat_name in names(categories)) {
 # 7. Shut down the cluster to free up memory
 stopCluster(cl)
 cat("\nAll 4 NetCDF files generated successfully!\n")
+}
 
 # Load the required libraries
 library(terra)
@@ -276,14 +279,20 @@ nc_files <- c(
   "Distance_Medium_Seamounts_5km.nc", 
   "Distance_Small_Seamounts_5km.nc"
 )
+robinson_crs <- "+proj=robin +lon_0=180 +datum=WGS84 +units=m +no_defs"
 
 r_stack <- rast(nc_files)
 names(r_stack) <- c("All Seamounts", "Big Seamounts", "Medium Seamounts", "Small Seamounts")
 
 cat("Aggregating raster for faster plotting...\n")
 r_agg <- aggregate(r_stack, fact = 2, fun = mean)
+r_robinson <- project(
+  crop(r_agg, ext(0, 360, -75, 75)),
+  robinson_crs,
+  method = "bilinear"
+)
 
-r_df <- as.data.frame(r_agg, xy = TRUE) %>%
+r_df <- as.data.frame(r_robinson, xy = TRUE, na.rm = TRUE) %>%
   pivot_longer(cols = -c(x, y), names_to = "Category", values_to = "Distance")
 
 # To prevent log10(0) returning -Inf (which turns into empty NA pixels), 
@@ -297,6 +306,7 @@ pts_med <- seamounts_360 %>% filter(size_group == 2) %>% mutate(Category = "Medi
 pts_small <- seamounts_360 %>% filter(size_group == 1) %>% mutate(Category = "Small Seamounts")
 
 pts_combined <- bind_rows(pts_all, pts_big, pts_med, pts_small)
+pts_combined <- st_transform(pts_combined, crs = robinson_crs)
 coords <- st_coordinates(pts_combined)
 pts_df <- pts_combined %>%
   st_drop_geometry() %>%
@@ -316,7 +326,9 @@ captions <- list(
 # =============================================================================
 # 3. LOOP THROUGH CATEGORIES AND SAVE INDIVIDUAL MAPS
 # =============================================================================
-world_map <- map_data("world2")
+world_map <- st_as_sf(map("world2", plot = FALSE, fill = TRUE)) %>%
+  st_set_crs(4326) %>%
+  st_transform(crs = robinson_crs)
 categories <- names(captions)
 
 for (cat_name in categories) {
@@ -331,11 +343,10 @@ for (cat_name in categories) {
   p <- ggplot() +
     
     # Raster Heatmap
-    geom_raster(data = r_sub, aes(x = x, y = y, fill = Distance)) +
+    geom_tile(data = r_sub, aes(x = x, y = y, fill = Distance)) +
     
     # Landmass
-    geom_polygon(data = world_map, aes(x = long, y = lat, group = group),
-                 fill = "grey15", color = "grey35", linewidth = 0.1) +
+    geom_sf(data = world_map, fill = "grey15", color = "grey35", linewidth = 0.1) +
     
     # Points
     geom_point(data = pts_sub, aes(x = x, y = y), 
@@ -353,7 +364,12 @@ for (cat_name in categories) {
     ) +
     
     # Limits
-    coord_cartesian(xlim = c(0, 360), ylim = c(-75, 75), expand = FALSE) +
+    coord_sf(
+      crs = robinson_crs,
+      default_crs = robinson_crs,
+      datum = 4326,
+      expand = FALSE
+    ) +
     
     # Labels (Title + Subtitle + Caption)
     labs(
