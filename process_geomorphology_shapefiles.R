@@ -499,8 +499,8 @@ if (make_maps) {
         color = "#ffffff"
       ),
       plot.caption = element_text(
-        size = 8,
-        color = "#54657e",
+        size = 10,
+        color = "#9aabc2",
         hjust = 0
       ),
       axis.text = element_blank(),
@@ -514,11 +514,11 @@ if (make_maps) {
       legend.key = element_blank(),
       legend.text = element_text(
         color = "#ffffff",
-        size = 8,
+        size = 11,
         face = "bold"
       ),
       legend.title = element_blank(),
-      legend.key.size = grid::unit(0.35, "cm")
+      legend.key.size = grid::unit(0.5, "cm")
     )
 
   ggsave(
@@ -529,7 +529,8 @@ if (make_maps) {
     plot = p_global,
     width = 16,
     height = 9,
-    dpi = 300
+    dpi = 300,
+    bg = "#020408"
   )
 
   message("Rendering Focused Basin map...")
@@ -574,13 +575,13 @@ if (make_maps) {
         color = "#ffffff"
       ),
       plot.subtitle = element_text(
-        size = 11,
+        size = 16,
         hjust = 0.5,
         color = "#8b9bb4"
       ),
       plot.caption = element_text(
-        size = 8,
-        color = "#54657e",
+        size = 10,
+        color = "#9aabc2",
         hjust = 0
       ),
       axis.text = element_blank(),
@@ -594,11 +595,11 @@ if (make_maps) {
       legend.key = element_blank(),
       legend.text = element_text(
         color = "#ffffff",
-        size = 8,
+        size = 11,
         face = "bold"
       ),
       legend.title = element_blank(),
-      legend.key.size = grid::unit(0.35, "cm")
+      legend.key.size = grid::unit(0.5, "cm")
     )
 
   ggsave(
@@ -609,7 +610,8 @@ if (make_maps) {
     plot = p_focused,
     width = 16,
     height = 9,
-    dpi = 300
+    dpi = 300,
+    bg = "#020408"
   )
 }
 

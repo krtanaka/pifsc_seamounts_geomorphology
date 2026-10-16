@@ -18,7 +18,7 @@ sf_use_s2(TRUE)
 # ==============================================================================
 # 2. LOAD AND PREPARE DATASET LAYERS
 # ==============================================================================
-base_path <- "C:/Users/Kisei.Tanaka/Desktop/ModelledSeamounts2011_v1/01_Data"
+base_path <- "A:/My Drive/Data/Seamounts & Knolls/ModelledSeamounts2011_v1/01_Data/"
 
 seamounts_sf  <- st_read(file.path(base_path, "Seamounts/Seamounts.shp"))
 seamounts_sf = seamounts_sf %>% filter(HEIGHT >= 2500)
@@ -39,34 +39,47 @@ metadata_caption <- paste0(
   "Deep Sea Research Part I 58: 442-453. doi: 10.1016/j.dsr.2011.02.004 | Data URL: http://data.unep-wcmc.org/datasets/41"
 )
 
+dark_background <- "#0b141f"
+dark_panel <- "#111d2b"
+dark_text <- "#e6edf3"
+muted_text <- "#a9b8c9"
+slide_width <- 16
+slide_height <- 9
+
 # Shared theme adjustments for spatial maps (Legend Top-Right / Over USA)
 map_theme_adjust <- theme_minimal() +
   theme(
-    plot.title = element_text(face = "bold", size = 12),
-    plot.caption = element_text(size = 7.5, color = "gray30", hjust = 0, lineheight = 1.1),
-    panel.background = element_rect(fill = alpha("black", 0.8)), 
+    plot.background = element_rect(fill = dark_background, color = NA),
+    panel.background = element_rect(fill = dark_background, color = NA),
+    plot.title = element_text(face = "bold", size = 18, color = dark_text),
+    plot.caption = element_text(size = 9, color = muted_text, hjust = 0, lineheight = 1.1),
+    axis.title = element_text(size = 12, color = dark_text),
+    axis.text = element_text(size = 10, color = muted_text),
     panel.grid = element_blank(),
     legend.position = c(0.86, 0.85),             
-    legend.background = element_rect(fill = alpha("white", 0.8), color = "white", linewidth = 0.3), 
-    legend.key = element_blank(), # Ensures individual legend keys are transparent
-    legend.title = element_text(size = 9, face = "bold"),
-    legend.text = element_text(size = 8),
-    legend.key.size = unit(0.4, "cm")
+    legend.background = element_rect(fill = dark_panel, color = "#415166", linewidth = 0.3),
+    legend.key = element_blank(),
+    legend.title = element_text(size = 12, face = "bold", color = dark_text),
+    legend.text = element_text(size = 10, color = dark_text),
+    legend.key.size = unit(0.55, "cm")
   )
 
 # Shared theme adjustments for hex plots (Legend Top-Left)
 hex_theme_adjust <- theme_minimal() +
   theme(
-    plot.title = element_text(face = "bold", size = 12),
-    plot.caption = element_text(size = 7.5, color = "gray30", hjust = 0, lineheight = 1.1),
-    axis.title = element_text(size = 9),
-    axis.text = element_text(size = 8),
+    plot.background = element_rect(fill = dark_background, color = NA),
+    panel.background = element_rect(fill = dark_background, color = NA),
+    plot.title = element_text(face = "bold", size = 18, color = dark_text),
+    plot.caption = element_text(size = 9, color = muted_text, hjust = 0, lineheight = 1.1),
+    axis.title = element_text(size = 12, color = dark_text),
+    axis.text = element_text(size = 10, color = muted_text),
+    panel.grid = element_line(color = "#263445"),
     legend.position = c(0.12, 0.78),             
-    legend.background = element_rect(fill = alpha("white", 0.6), color = "white", linewidth = 0.3),
+    legend.background = element_rect(fill = dark_panel, color = "#415166", linewidth = 0.3),
     legend.key = element_blank(),
-    legend.title = element_text(size = 9, face = "bold"),
-    legend.text = element_text(size = 8),
-    legend.key.size = unit(0.4, "cm")
+    legend.title = element_text(size = 12, face = "bold", color = dark_text),
+    legend.text = element_text(size = 10, color = dark_text),
+    legend.key.size = unit(0.55, "cm")
   )
 
 
@@ -76,39 +89,39 @@ hex_theme_adjust <- theme_minimal() +
 
 # Map 1: Seamounts by Height
 ggplot() +
-  geom_sf(data = world_cropped,fill = "gray90", color = "gray20", linewidth = 0.1) +
+  geom_sf(data = world_cropped, fill = "#202b38", color = "#526170", linewidth = 0.1) +
   geom_sf(data = seamounts_360, aes(fill = HEIGHT), color = "gray", stroke = 0.5, size = 2, alpha = 0.8, shape = 21) +
   scale_fill_viridis_c(option = "plasma", name = "Height (m)", trans = "log10") +
   pacific_view + map_theme_adjust +
   labs(title = "Pacific Seamounts by Height", x = "Longitude", y = "Latitude", caption = metadata_caption)
-ggsave("output/seamounts_by_height.png", width = 8, height = 9, dpi = 300, bg = "white")
+ggsave("output/seamounts_by_height.png", width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 
 # Map 2: Knolls by Height
 ggplot() +
-  geom_sf(data = world_cropped, fill = "gray90", color = "gray20", linewidth = 0.1) +
+  geom_sf(data = world_cropped, fill = "#202b38", color = "#526170", linewidth = 0.1) +
   geom_sf(data = knolls_360, aes(color = HEIGHT), size = 0.5, alpha = 0.8) +
   scale_color_viridis_c(option = "plasma", name = "Height (m)", trans = "log10") +
   pacific_view + map_theme_adjust +
   labs(title = "Pacific Knolls by Height", x = "Longitude", y = "Latitude", caption = metadata_caption)
-ggsave("output/knolls_by_height.png", width = 8, height = 9, dpi = 300, bg = "white")
+ggsave("output/knolls_by_height.png", width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 
 # Map 3: Seamounts by Summit Depth
 ggplot() +
-  geom_sf(data = world_cropped, fill = "gray90", color = "gray20", linewidth = 0.1) +
+  geom_sf(data = world_cropped, fill = "#202b38", color = "#526170", linewidth = 0.1) +
   geom_sf(data = seamounts_360, aes(fill = DEPTH), color = "gray", stroke = 0.5, size = 2, alpha = 0.8, shape = 21) +
   scale_fill_viridis_c(option = "mako", name = "Depth (m)") +
   pacific_view + map_theme_adjust +
   labs(title = "Pacific Seamounts by Summit Depth", x = "Longitude", y = "Latitude", caption = metadata_caption)
-ggsave("output/seamounts_by_depth.png", width = 8, height = 9, dpi = 300, bg = "white")
+ggsave("output/seamounts_by_depth.png", width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 
 # Map 4: Knolls by Summit Depth
 ggplot() +
-  geom_sf(data = world_cropped,fill = "gray90", color = "gray20", linewidth = 0.1) +
+  geom_sf(data = world_cropped, fill = "#202b38", color = "#526170", linewidth = 0.1) +
   geom_sf(data = knolls_360, aes(color = DEPTH), size = 0.5, alpha = 0.8) +
   scale_color_viridis_c(option = "mako", name = "Depth (m)") +
   pacific_view + map_theme_adjust +
   labs(title = "Pacific Knolls by Summit Depth", x = "Longitude", y = "Latitude", caption = metadata_caption)
-ggsave("output/knolls_by_depth.png", width = 8, height = 9, dpi = 300, bg = "white")
+ggsave("output/knolls_by_depth.png", width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 
 
 # ==============================================================================
@@ -122,7 +135,7 @@ ggplot(seamounts_360, aes(x = DEPTH, y = HEIGHT)) +
   hex_theme_adjust + 
   labs(title = "Seamounts: Morphological Density Structure", 
        x = "Depth", y = "Height", caption = metadata_caption)
-ggsave("output/seamounts_morphology_hex.png", width = 8, height = 9, dpi = 300, bg = "white")
+ggsave("output/seamounts_morphology_hex.png", width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 
 # Plot 6: Knolls Morphological Density
 ggplot(knolls_360, aes(x = DEPTH, y = HEIGHT)) +
@@ -131,7 +144,7 @@ ggplot(knolls_360, aes(x = DEPTH, y = HEIGHT)) +
   hex_theme_adjust + 
   labs(title = "Knolls: Morphological Density Structure", 
        x = "Depth", y = "Height", caption = metadata_caption)
-ggsave("output/knolls_morphology_hex.png", width = 8, height = 9, dpi = 300, bg = "white")
+ggsave("output/knolls_morphology_hex.png", width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 
 # 1. Load the necessary libraries
 library(sf)
@@ -354,23 +367,24 @@ for (cat_name in categories) {
     # Professional Theme
     theme_minimal(base_size = 14) +
     theme(
-      panel.background = element_rect(fill = "#0b141f", color = NA),
-      plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = dark_background, color = NA),
+    plot.background = element_rect(fill = dark_background, color = NA),
       panel.grid = element_blank(),
       
-      plot.title = element_text(face = "bold", size = 20, margin = margin(b = 8)),
-      plot.subtitle = element_text(size = 13, color = "grey40", margin = margin(b = 10)),
-      plot.caption = element_text(size = 11, face = "italic", color = "grey30", hjust = 1, margin = margin(t = 15)),
+    plot.title = element_text(face = "bold", size = 20, color = dark_text, margin = margin(b = 8)),
+    plot.subtitle = element_text(size = 13, color = muted_text, margin = margin(b = 10)),
+    plot.caption = element_text(size = 11, face = "italic", color = muted_text, hjust = 1, margin = margin(t = 15)),
       
-      axis.text = element_text(color = "grey50", size = 10),
-      axis.title = element_text(color = "grey30", face = "bold"),
+    axis.text = element_text(color = muted_text, size = 10),
+    axis.title = element_text(color = dark_text, face = "bold"),
       
       legend.position = "bottom",
       legend.key.width = unit(4, "cm"),
       legend.key.height = unit(0.5, "cm"),
       legend.title.position = "top",
-      legend.title = element_text(hjust = 0.5, face = "bold", size = 13),
-      legend.text = element_text(size = 11)
+    legend.background = element_rect(fill = dark_panel, color = NA),
+    legend.title = element_text(hjust = 0.5, face = "bold", size = 13, color = dark_text),
+    legend.text = element_text(size = 11, color = dark_text)
     )
   
   # Format file name (e.g., "Map_Big_Seamounts.png")
@@ -378,8 +392,7 @@ for (cat_name in categories) {
   file_out <- sprintf("output/Map_%s_Log10.png", safe_name)
   
   # Save the individual map
-  ggsave(file_out, plot = p, width = 12, height = 7, dpi = 300)
+  ggsave(file_out, plot = p, width = slide_width, height = slide_height, dpi = 300, bg = dark_background)
 }
 
 cat("All 4 individual Log10 maps have been saved successfully to the output folder!\n")
-
