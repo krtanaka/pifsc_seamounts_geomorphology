@@ -384,9 +384,7 @@ for (cat_name in categories) {
     labs(
       title = sprintf("Global Oceanic Proximity: %s", cat_name),
       subtitle = "Geodesic distance to the nearest seamount with specific locations overlaid",
-      caption = captions[[cat_name]],
-      x = "Longitude", 
-      y = "Latitude"
+      caption = captions[[cat_name]]
     ) +
     
     # Professional Theme
@@ -400,8 +398,8 @@ for (cat_name in categories) {
     plot.subtitle = element_text(size = 13, color = muted_text, margin = margin(b = 10)),
     plot.caption = element_text(size = 11, face = "italic", color = muted_text, hjust = 1, margin = margin(t = 15)),
       
-    axis.text = element_text(color = muted_text, size = 10),
-    axis.title = element_text(color = dark_text, face = "bold"),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
       
       legend.position = "bottom",
       legend.key.width = unit(4, "cm"),
