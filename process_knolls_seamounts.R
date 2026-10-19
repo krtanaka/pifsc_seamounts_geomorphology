@@ -286,8 +286,9 @@ names(r_stack) <- c("All Seamounts", "Big Seamounts", "Medium Seamounts", "Small
 
 cat("Aggregating raster for faster plotting...\n")
 r_agg <- aggregate(r_stack, fact = 2, fun = mean)
+# GDAL expects geographic raster longitudes in [-180, 180] when reprojecting.
 r_robinson <- project(
-  crop(r_agg, ext(0, 360, -75, 75)),
+  crop(rotate(r_agg), ext(-180, 180, -75, 75)),
   robinson_crs,
   method = "bilinear"
 )
@@ -326,8 +327,11 @@ captions <- list(
 # =============================================================================
 # 3. LOOP THROUGH CATEGORIES AND SAVE INDIVIDUAL MAPS
 # =============================================================================
-world_map <- st_as_sf(map("world2", plot = FALSE, fill = TRUE)) %>%
-  st_set_crs(4326) %>%
+world_map <- rnaturalearth::ne_countries(scale = 110, returnclass = "sf") %>%
+  st_geometry() %>%
+  # A Pacific-centered projection has its seam at Greenwich, not at 180 degrees.
+  st_break_antimeridian(lon_0 = 180) %>%
+  st_collection_extract("POLYGON") %>%
   st_transform(crs = robinson_crs)
 categories <- names(captions)
 
@@ -343,7 +347,10 @@ for (cat_name in categories) {
   p <- ggplot() +
     
     # Raster Heatmap
-    geom_tile(data = r_sub, aes(x = x, y = y, fill = Distance)) +
+    geom_tile(
+      data = r_sub, aes(x = x, y = y, fill = Distance),
+      width = res(r_robinson)[1], height = res(r_robinson)[2]
+    ) +
     
     # Landmass
     geom_sf(data = world_map, fill = "grey15", color = "grey35", linewidth = 0.1) +
@@ -368,6 +375,8 @@ for (cat_name in categories) {
       crs = robinson_crs,
       default_crs = robinson_crs,
       datum = 4326,
+      xlim = c(xmin(r_robinson), xmax(r_robinson)),
+      ylim = c(ymin(r_robinson), ymax(r_robinson)),
       expand = FALSE
     ) +
     
