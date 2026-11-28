@@ -86,7 +86,8 @@ drop_duplicate_locations <- TRUE
 recalculate <- "missing"
 res_km      <- 5                                         # grid cell size (km at equator)
 n_chunks    <- 60                                        # latitude strips for parallel work
-n_cores     <- max(1, min(20, parallel::detectCores() - 2))
+# Respect cloud/container CPU quotas; reserve two cores, with at least one worker.
+n_cores     <- min(n_chunks, parallelly::availableCores(omit = 2))
 
 # Plot switches
 make_feature_maps  <- FALSE  # exploratory maps/hexplots of the raw feature layers

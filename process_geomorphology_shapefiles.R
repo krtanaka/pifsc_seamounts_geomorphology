@@ -110,9 +110,8 @@ message(
   " geomorphology layers to 0.05-degree WGS84..."
 )
 
-available_cores <- parallel::detectCores(logical = TRUE)
-num_cores <- max(1, min(length(layers_to_process), available_cores - 1))
-num_cores <- 5
+# Respect cloud/container CPU quotas; reserve two cores, with at least one worker.
+num_cores <- min(length(layers_to_process), parallelly::availableCores(omit = 2))
 
 cl <- parallel::makeCluster(num_cores)
 doParallel::registerDoParallel(cl)

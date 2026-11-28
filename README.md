@@ -9,6 +9,46 @@ bycatch).
 | `process_knolls_seamounts.R` | Filters Yesson et al. (2011) seamounts/knolls and builds global geodesic distance rasters (NetCDF) + maps |
 | `process_geomorphology_shapefiles.R` | Rasterizes Harris et al. (2014) global seafloor geomorphology |
 
+## Simple raster-only scripts
+
+These standalone scripts need only `terra` (`install.packages("terra")`).
+They use the staged dataset folders under `~/data/deepsea/data_download`.
+Set the environment variable `PIFSC_GIS_DATA_DIR` to use another root directory,
+or edit `data_root` at the top of each script.
+
+| Script | Output |
+|---|---|
+| `rasterize_seamounts_knolls.R` | Distance in km to the nearest summit; edit `max_depth_m` to `400`, `1000`, or `NULL` (all depths) |
+| `rasterize_geomorphology.R` | One estimated fractional-coverage GeoTIFF (0-1) per geomorphology shapefile |
+| `rasterize_ecological_benthic_units.R` | Existing EBU GeoTIFFs aligned to the common grid, without re-rasterizing duplicate vector products |
+
+All use WGS84, longitude -180 to 180, latitude -60 to 60, at 0.05 degrees
+(7,200 columns by 2,400 rows). Outputs go under `output/rasters/`, separated by
+dataset. Existing outputs are skipped; set `overwrite <- TRUE` after changing
+inputs or options. The scripts run sequentially, without maps or worker clusters.
+Seamount distances use all global input points to avoid boundary effects; the
+400 m and 1,000 m thresholds are inclusive. Surface-breaking summits are removed;
+missing depths are retained only for the all-depth run. Confirm the inferred
+`DEPTH` sign and metre units against source metadata.
+
+From the repository directory on the cloud workstation:
+
+```bash
+Rscript rasterize_seamounts_knolls.R
+Rscript rasterize_geomorphology.R
+Rscript rasterize_ecological_benthic_units.R
+```
+
+EBU reads only `01_classification`, `02_environmental_predictors`, and
+`04_supporting`; it excludes BioOracle, temporary/smoke-test folders and partial
+downloads. Classification, lithology and slope-hemisphere rasters use
+nearest-neighbor resampling; continuous rasters use bilinear interpolation.
+Source units are unchanged. Reprojection does not make every source suitable
+for modeling: the EBU metadata reports a suspicious 0-360 range for
+`EBU_predictor_bathymetry_0bd2bd53.tif`; the script warns but preserves that layer
+under its original name for review. Several predictors have multiple versions;
+these remain separate, not silently merged.
+
 ---
 
 ## 1. Should seamounts be filtered? Literature notes
@@ -118,7 +158,7 @@ reproduces the previous version (seamounts only, `HEIGHT >= 2500`, tertiles).
 | `depth_sign_convention` | `"auto"` (infer from median), `"negative_down"`, `"positive_down"` |
 | `drop_duplicate_locations` | drop identical summit coordinates |
 | `recalculate` | `"missing"` compute only absent NetCDFs (default), `"all"` overwrite, `"none"` plot only |
-| `res_km`, `n_chunks`, `n_cores` | grid resolution and parallelisation |
+| `res_km`, `n_chunks`, `n_cores` | grid resolution and parallelisation; workers automatically respect CPU quotas, reserving two cores (minimum one worker) and capped by the number of strips |
 | `make_feature_maps` | exploratory maps/hex plots of raw layers (hex plots mark depth thresholds) |
 | `make_distance_maps` | one log10 distance map per NetCDF |
 | `nc_dir`, `output_dir` | output locations (defaults: repo root, `output/`) |
@@ -152,6 +192,13 @@ by the previous version (seamounts with `HEIGHT >= 2500`, height tertiles) and
 correspond to the `legacy_tall` scenario.
 
 ### Runtime note
+
+Both scripts require `parallelly` for cloud/container-aware CPU detection.
+Install it once in R with `install.packages("parallelly")`. The geomorphology
+script likewise reserves two cores and caps workers at the number of layers.
+Automatic detection replaces the previous 20-worker cap and fixed five-worker
+override, respectively. CPU detection does not account for raster memory needs;
+lower `n_cores` or `num_cores` manually if memory is limited.
 
 Global 5 km distance rasters are expensive (minutes to hours per layer,
 depending on cores and feature count). Leave `recalculate = "missing"` so
